@@ -100,7 +100,7 @@ LLM适配层统一接口，支持以下Provider：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/research` | 发起研究任务，返回 task_id |
+| `POST` | `/api/research` | 发起研究任务（含数据源选择），返回 task_id |
 | `GET` | `/api/research/{task_id}/stream` | SSE 流式推送Agent进度和辩论过程 |
 | `GET` | `/api/report/{task_id}` | 获取最终研报JSON（Markdown + 引用映射） |
 | `POST` | `/api/upload` | 上传PDF/文档，向量化后返回 doc_id |
@@ -142,25 +142,71 @@ POST /api/research { query, uploaded_docs[] }
        存储报告 + 返回结果
 ```
 
-### 3.3 RAG 数据源适配层
+### 3.3 数据源选择（每次研究可选）
+
+用户发起研究时可自由组合数据源——只传PDF、只用API、或两者都用：
+
+```
+POST /api/research
+{
+  "query": "分析宁德时代 300750",
+  "data_sources": {
+    "akshare": true,        // 是否启用金融API（财报/公告/行情）
+    "news": true,           // 是否启用新闻舆情检索
+    "uploaded_docs": [      // 用户上传的文档ID列表（空数组=不上传）
+      "doc_abc123",
+      "doc_def456"
+    ]
+  }
+}
+```
+
+前端搜索页提供开关控件：
+
+```
+┌──────────────────────────────────────┐
+│  🔍 [  输入公司/行业/股票代码...    ] │
+│                                      │
+│  数据源：                             │
+│  [✓] 金融数据API (AkShare)           │
+│  [✓] 新闻舆情                        │
+│  [📎] 上传PDF财报/研报  [+已选2份]   │
+│                                      │
+│  [🚀 开始深度研究]                    │
+└──────────────────────────────────────┘
+```
+
+### 3.4 RAG 数据源适配层
 
 ```
 class DataSourceAdapter:
     """统一数据源接口"""
     def search(query: str, top_k: int) -> List[Document]
     def load_documents(source_type: str) -> List[Document]
+    def is_available() -> bool     # 检查数据源是否可用
 
 # 实现类
 AkShareAdapter     # A股财报/公告（免费API）
 NewsSearchAdapter  # 新闻舆情检索
 UserUploadAdapter  # 用户上传PDF/文档
+
+# RAG引擎根据data_sources配置动态启用适配器
+class RAGEngine:
+    def __init__(self, data_sources: DataSourceConfig):
+        self.adapters = []
+        if data_sources.akshare:    self.adapters.append(AkShareAdapter())
+        if data_sources.news:       self.adapters.append(NewsSearchAdapter())
+        if data_sources.uploaded_docs:
+            for doc_id in data_sources.uploaded_docs:
+                self.adapters.append(UserUploadAdapter(doc_id))
 ```
 
 - RAG引擎：LlamaIndex，负责文档解析、分块、向量化、检索
 - 向量存储：ChromaDB，持久化到 `./data/chroma`
 - 文档解析支持：PDF、TXT、Markdown、CSV
+- 空数据源处理：所有数据源都关闭或返回空时，明确告知用户"未选择数据源"或"指定数据源无结果"
 
-### 3.4 引用溯源系统
+### 3.5 引用溯源系统
 
 ```
 报告中的每条分析性结论：
@@ -181,7 +227,7 @@ UserUploadAdapter  # 用户上传PDF/文档
 - FactCheck Agent 对无可靠信源的推断标注 ⚠️
 - 前端点击 `[ref:xxx]` → 右侧面板高亮对应原文
 
-### 3.5 事件链时间轴
+### 3.6 事件链时间轴
 
 ```
 事件提取流程：
@@ -237,6 +283,7 @@ UserUploadAdapter  # 用户上传PDF/文档
 | 组件 | 职责 |
 |------|------|
 | `SearchBar` | 公司/行业输入，自动补全 |
+| `DataSourceToggle` | 数据源开关（金融API/新闻/上传文档） |
 | `FileUpload` | 拖拽上传PDF，显示上传进度 |
 | `ProgressPanel` | SSE实时显示4个Agent进度卡片 |
 | `AgentCard` | 单个Agent状态+输出摘要 |
@@ -249,7 +296,7 @@ UserUploadAdapter  # 用户上传PDF/文档
 
 ### 4.4 交互流程
 
-1. **首页** → 输入公司/行业 → 可选上传PDF → 点击"开始研究"
+1. **首页** → 输入公司/行业 → 勾选数据源（API/新闻/上传PDF） → 点击"开始研究"
 2. **跳转** → `/report/{task_id}` → SSE连接 → 依次看到Agent卡片激活
 3. **辩论阶段** → Bull/Bear卡片并行输出观点片段
 4. **事实核查阶段** → FactCheck卡片显示验证结果
@@ -278,12 +325,16 @@ type SSEEvent =
 
 ```
 用户输入: "分析宁德时代 300750"
+  勾选: [✓]金融API [✓]新闻 [📎]财报Q2.pdf
   │
   ▼
-POST /api/research { query: "宁德时代 300750", docs: [] }
+POST /api/research {
+  query: "宁德时代 300750",
+  data_sources: { akshare: true, news: true, uploaded_docs: ["doc_xyz"] }
+}
   │
-  ├─► Backend: 解析查询 → 识别股票代码 → 调用AkShare获取基础数据
-  ├─► Backend: RAG预检索 (财报+新闻+行情)
+  ├─► Backend: 解析查询 → 识别股票代码 → 根据data_sources配置适配器
+  ├─► Backend: RAG预检索 (仅已启用的数据源)
   │
   ├─► Bull Agent: "寻找宁德时代的投资价值..."
   │     ├─ 重新检索(多方视角prompt)
@@ -348,6 +399,7 @@ findeep/
 │   │   │       └── page.tsx
 │   │   ├── components/
 │   │   │   ├── SearchBar.tsx
+│   │   │   ├── DataSourceToggle.tsx
 │   │   │   ├── FileUpload.tsx
 │   │   │   ├── ProgressPanel.tsx
 │   │   │   ├── AgentCard.tsx
