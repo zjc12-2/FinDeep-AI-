@@ -17,6 +17,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.api.upload import router as upload_router
+
+app.include_router(upload_router)
+
 
 @app.get("/api/health")
 async def health_check():
