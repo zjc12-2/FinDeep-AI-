@@ -8,6 +8,22 @@ from chromadb.config import Settings as ChromaSettings
 from app.config import settings as app_settings
 from app.models.schemas import UploadResponse
 
+
+def _get_chroma_client():
+    """Get ChromaDB client based on configured mode."""
+    if app_settings.chroma_mode == "docker":
+        return chromadb.HttpClient(
+            host=app_settings.chroma_host,
+            port=app_settings.chroma_port,
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
+    else:
+        os.makedirs(app_settings.chroma_data_dir, exist_ok=True)
+        return chromadb.PersistentClient(
+            path=app_settings.chroma_data_dir,
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
+
 router = APIRouter(prefix="/api", tags=["upload"])
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".csv"}
@@ -59,12 +75,8 @@ async def upload_document(file: UploadFile = File(...)):
     doc_id = uuid.uuid4().hex[:12]
     chunks = _chunk_text(text)
 
-    # Store in ChromaDB
-    client = chromadb.HttpClient(
-        host=app_settings.chroma_host,
-        port=app_settings.chroma_port,
-        settings=ChromaSettings(anonymized_telemetry=False),
-    )
+    # Store in ChromaDB (local or docker mode)
+    client = _get_chroma_client()
     collection = client.get_or_create_collection("user_docs")
 
     for i, chunk in enumerate(chunks):

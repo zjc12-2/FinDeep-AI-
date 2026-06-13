@@ -1,4 +1,5 @@
 """RAG engine integrating LlamaIndex with ChromaDB and multi-source retrieval."""
+import os
 import uuid
 from typing import List, Dict, Optional
 import chromadb
@@ -10,6 +11,23 @@ from app.rag.citation import CitationManager
 from app.models.research import DataSourceConfig
 
 
+def _get_chroma_client():
+    """Get ChromaDB client based on configured mode — local (zero-dep) or docker."""
+    if app_settings.chroma_mode == "docker":
+        return chromadb.HttpClient(
+            host=app_settings.chroma_host,
+            port=app_settings.chroma_port,
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
+    else:
+        # 本地模式：数据存在项目目录下，无需额外服务
+        os.makedirs(app_settings.chroma_data_dir, exist_ok=True)
+        return chromadb.PersistentClient(
+            path=app_settings.chroma_data_dir,
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
+
+
 class RAGEngine:
     """Orchestrates multi-source document retrieval and citation tracking."""
 
@@ -18,12 +36,8 @@ class RAGEngine:
         self.adapters: List[DataSourceAdapter] = []
         self.citations = CitationManager()
 
-        # Initialize ChromaDB client
-        self.chroma_client = chromadb.HttpClient(
-            host=app_settings.chroma_host,
-            port=app_settings.chroma_port,
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
+        # Initialize ChromaDB client (auto-detects local/docker mode)
+        self.chroma_client = _get_chroma_client()
 
         # Build adapter list based on config
         self._build_adapters()

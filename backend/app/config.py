@@ -24,7 +24,9 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None
 
-    # ChromaDB
+    # ChromaDB — 默认本地模式，零依赖
+    chroma_mode: str = "local"   # "local" = 本地文件存储, "docker" = 远程ChromaDB服务
+    chroma_data_dir: str = "./data/chroma"
     chroma_host: str = "chromadb"
     chroma_port: int = 8000
 
