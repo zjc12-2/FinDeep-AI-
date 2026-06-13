@@ -19,9 +19,11 @@ app.add_middleware(
 
 from app.api.upload import router as upload_router
 from app.api.research import router as research_router
+from app.api.timeline import router as timeline_router
 
 app.include_router(upload_router)
 app.include_router(research_router)
+app.include_router(timeline_router)
 
 
 @app.get("/api/health")

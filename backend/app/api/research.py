@@ -11,6 +11,8 @@ from app.agents.bull_agent import run_bull_agent_stream
 from app.agents.bear_agent import run_bear_agent_stream
 from app.agents.factcheck_agent import run_factcheck_agent_stream
 from app.agents.synthesizer_agent import run_synthesizer_agent_stream
+from app.agents.followup_agent import run_followup_agent
+from app.models.research import FollowUpRequest
 
 router = APIRouter(prefix="/api", tags=["research"])
 
@@ -185,3 +187,31 @@ async def get_report(task_id: str):
             return {"status": "running", "message": "报告生成中，请等待..."}
         raise HTTPException(status_code=404, detail="Report not found")
     return report.model_dump()
+
+
+@router.get("/sources/{citation_id}")
+async def get_source(citation_id: str):
+    """Get the original source text for a citation."""
+    # Search through all task reports for the citation
+    for task_id, report in _reports.items():
+        if citation_id in report.citations:
+            return report.citations[citation_id]
+    raise HTTPException(status_code=404, detail="Citation not found")
+
+
+@router.post("/ask")
+async def ask_followup(request: FollowUpRequest):
+    """Ask a follow-up question about an existing report."""
+    report = _reports.get(request.task_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    try:
+        answer = await run_followup_agent(
+            question=request.question,
+            report_markdown=report.markdown,
+            citations=report.citations,
+        )
+        return {"answer": answer, "task_id": request.task_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"追问失败: {str(e)}")
