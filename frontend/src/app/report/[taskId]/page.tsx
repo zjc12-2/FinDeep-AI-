@@ -57,6 +57,16 @@ export default function ReportPage() {
     try {
       const r = await api.getReport(taskId);
       setReport(r);
+      // Save to history
+      const stored = localStorage.getItem("findeep_history");
+      const history = stored ? JSON.parse(stored) : [];
+      const existing = history.findIndex((h: any) => h.task_id === r.task_id);
+      if (existing >= 0) {
+        history[existing] = { task_id: r.task_id, query: r.query, created_at: r.created_at };
+      } else {
+        history.unshift({ task_id: r.task_id, query: r.query, created_at: r.created_at });
+      }
+      localStorage.setItem("findeep_history", JSON.stringify(history.slice(0, 20)));
     } catch (err: any) {
       setError(err.message);
     }
