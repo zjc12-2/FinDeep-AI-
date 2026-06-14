@@ -2,3 +2,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .env
+node_modules/
+.next/
+backend/data/
+*.pyc
